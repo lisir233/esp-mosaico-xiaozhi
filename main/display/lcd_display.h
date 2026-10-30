@@ -60,9 +60,11 @@ public:
 // SPI LCD display
 class SpiLcdDisplay : public LcdDisplay {
 public:
+    // buffer_pixels == 0 keeps the default 20-line partial-render buffer.
+    // Boards may bound it to fit their panel's single-transfer capacity.
     SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel, int width,
                   int height, int offset_x, int offset_y, bool mirror_x, bool mirror_y,
-                  bool swap_xy);
+                  bool swap_xy, uint32_t buffer_pixels = 0);
 };
 
 // RGB LCD display

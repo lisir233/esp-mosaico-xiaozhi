@@ -99,6 +99,15 @@ SCL/DATA0–3 to `GPIO_DRIVE_CAP_DEFAULT` at 40 MHz. Keep these transport settin
 in addition to the area alignment; a clean LVGL snapshot does not verify the
 physical panel's transfers or rule out persistent horizontal artifacts.
 
+The Mosaico LVGL draw buffer holds four full-width RGB565 rows (3840 bytes),
+so a partial refresh fits in one SPI transaction and one DMA node. Narrow
+rectangles may span more rows but keep the same pixel budget. Startup checks
+this budget against `spi_bus_get_max_transaction_len()` and logs the actual
+transaction capacity: the bus's requested 7680 bytes can be rounded up by IDF.
+The native simulator uses the same draw-buffer budget and asserts every flush
+fits. Physical panel observation is still required to validate persistent
+stripe behavior and the refresh-rate impact of smaller updates.
+
 `scripts/mosaico-ui-sim` builds the same view using the resolved LVGL component,
 system SDL2, CMake, C++20 and Noto CJK fonts:
 

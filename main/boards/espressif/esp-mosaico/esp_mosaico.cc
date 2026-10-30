@@ -14,6 +14,7 @@
 #include "mcp_server.h"
 #include "mosaico_camera.h"
 #include "mosaico_display.h"
+#include "mosaico_display_config.h"
 #include "mosaico_feedback.h"
 #include "settings.h"
 #include "wifi_board.h"
@@ -309,6 +310,8 @@ private:
             .flags = SPICOMMON_BUSFLAG_QUAD,
         };
         ESP_ERROR_CHECK(spi_bus_initialize(DISPLAY_QSPI_HOST, &bus_config, SPI_DMA_CH_AUTO));
+        constexpr uint32_t draw_buffer_pixels = DISPLAY_WIDTH * kMosaicoDrawBufferLines;
+        constexpr size_t draw_buffer_bytes = draw_buffer_pixels * sizeof(uint16_t);
 
         const gpio_num_t qspi_pins[] = {sclk, DISPLAY_QSPI_D0, DISPLAY_QSPI_D1, DISPLAY_QSPI_D2,
                                         DISPLAY_QSPI_D3};
@@ -328,8 +331,14 @@ private:
             .flags = {.quad_mode = true, .psram_dma_direct = false},
         };
         ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi(DISPLAY_QSPI_HOST, &io_config, &panel_io));
-        ESP_LOGI(TAG, "LCD QSPI: 40 MHz, %u-byte DMA chunks, SRAM staging, drive=%d",
-                 static_cast<unsigned>(bus_config.max_transfer_sz), GPIO_DRIVE_CAP_DEFAULT);
+        // IDF creates the SPI master context when panel IO adds its device.
+        // Querying before this point returns ESP_ERR_INVALID_ARG.
+        size_t max_transaction_bytes = 0;
+        ESP_ERROR_CHECK(spi_bus_get_max_transaction_len(DISPLAY_QSPI_HOST, &max_transaction_bytes));
+        ESP_ERROR_CHECK(draw_buffer_bytes <= max_transaction_bytes ? ESP_OK : ESP_ERR_INVALID_SIZE);
+        ESP_LOGI(TAG, "LCD QSPI: 40 MHz, draw=%u bytes, max_transaction=%u bytes, SRAM, drive=%d",
+                 static_cast<unsigned>(draw_buffer_bytes),
+                 static_cast<unsigned>(max_transaction_bytes), GPIO_DRIVE_CAP_DEFAULT);
 
         co5300_vendor_config_t vendor_config = {
             .init_cmds = kCo5300InitCommands,
@@ -351,7 +360,7 @@ private:
 
         display_ = new MosaicoDisplay(panel_io, panel, DISPLAY_WIDTH, DISPLAY_HEIGHT,
                                       DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X,
-                                      DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
+                                      DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY, draw_buffer_pixels);
         backlight_ = new MosaicoBacklight(panel_io, display_);
         backlight_->RestoreBrightness();
     }

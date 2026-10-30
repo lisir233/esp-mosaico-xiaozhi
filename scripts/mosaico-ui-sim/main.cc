@@ -4,8 +4,9 @@
 #include <cstring>
 #include <filesystem>
 #include <thread>
-#include "mosaico_ui.h"
 #include "mosaico_display_alignment.h"
+#include "mosaico_display_config.h"
+#include "mosaico_ui.h"
 
 static lv_point_t pointer;
 static bool pressed = false;
@@ -68,12 +69,13 @@ int main(int argc, char** argv) {
         lv_sdl_mousewheel_create();
     } else {
         display = lv_display_create(480, 480);
-        static uint8_t pixels[480 * 40 * 2];
+        static uint8_t pixels[480 * kMosaicoDrawBufferLines * 2];
         lv_display_set_buffers(display, pixels, nullptr, sizeof(pixels),
                                LV_DISPLAY_RENDER_MODE_PARTIAL);
         lv_display_set_flush_cb(display, [](lv_display_t* d, const lv_area_t* area, uint8_t*) {
             assert(area->x1 % 4 == 0 && (area->x2 + 1) % 4 == 0);
             assert(area->x1 >= 0 && area->x2 < 480);
+            assert(lv_area_get_size(area) <= 480 * kMosaicoDrawBufferLines);
             lv_display_flush_ready(d);
         });
         auto* input = lv_indev_create();
