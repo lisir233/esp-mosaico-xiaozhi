@@ -1,0 +1,24 @@
+{
+  "schema": "mosaico-ideas/project-release/1",
+  "project": {
+    "title": "小智 · ESP-Mosaico 语音伙伴",
+    "categories": ["audio", "display", "communication"],
+    "boards": ["camera"],
+    "tags": ["XiaoZhi", "ESP32-S31", "中文语音", "AI", "开发调试版"],
+    "license": "MIT; bundled Noto-derived display fonts: SIL Open Font License 1.1",
+    "external_links": [{"label": "GitHub source", "url": "https://github.com/lisir233/esp-mosaico-xiaozhi", "platform": "github"}]
+  },
+  "firmware": "dist/xiaozhi-2.5.3.irisfw",
+  "website": {
+    "readme": "publishing/README.md",
+    "changelog": "publishing/CHANGELOG.md",
+    "attachments": ["publishing/FONT-LICENSE.txt"]
+  },
+  "device": {
+    "default_locale": "zh-CN",
+    "presentations": {
+      "zh-CN": {"mode": "prebuilt", "display": "publishing/device/zh-CN/display.json"},
+      "en": {"mode": "prebuilt", "display": "publishing/device/en/display.json"}
+    }
+  }
+}
