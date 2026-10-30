@@ -21,7 +21,7 @@ public:
                std::function<bool()> preview_allowed = {});
     void Preview(bool enabled) { preview_.store(enabled); }
     bool Inspect();
-    bool Available() const { return video_.IsReady() && worker_ready_; }
+    bool Available() const { return video_.IsInitialized() && worker_ready_; }
 
 private:
     EspVideo video_;
@@ -35,4 +35,5 @@ private:
     std::function<bool()> preview_allowed_;
     void Run();
     void ApplyCredentials();
+    bool CaptureFrame();
 };

@@ -3,7 +3,7 @@
 #include <esp_timer.h>
 #include <freertos/task.h>
 
-MosaicoCamera::MosaicoCamera(const esp_video_init_config_t& config) : video_(config) {}
+MosaicoCamera::MosaicoCamera(const esp_video_init_config_t& config) : video_(config, false) {}
 void MosaicoCamera::SetExplainUrl(const std::string& url, const std::string& token) {
     std::lock_guard lock(config_gate_);
     url_ = url;
@@ -16,7 +16,14 @@ void MosaicoCamera::ApplyCredentials() {
 bool MosaicoCamera::Capture() {
     preview_ = false;
     std::lock_guard lock(gate_);
-    return video_.Capture();
+    return CaptureFrame();
+}
+bool MosaicoCamera::CaptureFrame() {
+    if (!video_.StartStreaming())
+        return false;
+    const bool captured = video_.Capture();
+    const bool stopped = video_.StopStreaming();
+    return captured && stopped;
 }
 bool MosaicoCamera::SetHMirror(bool enabled) {
     std::lock_guard lock(gate_);
@@ -39,7 +46,7 @@ MosaicoCamera::Result MosaicoCamera::CaptureAndExplain(const std::string& questi
             return std::unexpected("请先开始一次语音对话，再拍照识图");
     }
     ApplyCredentials();
-    if (!video_.Capture())
+    if (!CaptureFrame())
         return std::unexpected("拍照失败，请检查相机连接");
     return video_.Explain(question);
 }
@@ -63,6 +70,7 @@ void MosaicoCamera::Run() {
     constexpr int64_t kStatsPeriodUs = 5000000;
     int64_t stats_start = 0, busy_us = 0;
     unsigned frames = 0;
+    bool stop_failed = false;
     for (;;) {
         const auto started = esp_timer_get_time();
         if (inspect_.load()) {
@@ -76,9 +84,10 @@ void MosaicoCamera::Run() {
             {
                 std::lock_guard lock(gate_);
                 if (preview_.load() &&
-                    !video_.ReadPreview([this](const EspVideo::PreviewFrame& frame) {
-                        return viewfinder_.Present(frame);
-                    })) {
+                    (!video_.StartStreaming() ||
+                     !video_.ReadPreview([this](const EspVideo::PreviewFrame& frame) {
+                         return viewfinder_.Present(frame);
+                     }))) {
                     preview_ = false;
                     failed = true;
                 }
@@ -101,6 +110,11 @@ void MosaicoCamera::Run() {
                 }
             }
         } else {
+            std::lock_guard lock(gate_);
+            const bool stopped = video_.StopStreaming();
+            if (!stopped && !stop_failed && failure_)
+                failure_();
+            stop_failed = !stopped;
             stats_start = 0;
             frames = 0;
             busy_us = 0;

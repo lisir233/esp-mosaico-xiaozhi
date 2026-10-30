@@ -73,6 +73,8 @@ The Vibe Mode shared values remain read-only. An empty password supports an open
 network; missing or invalid values fall back to the usual provisioning flow.
 Later edits to Vibe Mode credentials do not overwrite XiaoZhi's saved networks.
 
+Camera capture starts on demand. Boot initializes the sensor without streaming; closing or pausing the viewfinder and completing a still capture stop the stream.
+
 The camera button opens the left CameraBoard viewfinder. The orange shutter sends
 a photo for visual description; Ask returns to voice input. The vision endpoint is
 provided through normal XiaoZhi MCP initialization, so connect to the voice service

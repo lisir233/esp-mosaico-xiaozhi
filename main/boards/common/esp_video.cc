@@ -107,7 +107,7 @@ static void log_available_video_devices() {
 #define CAM_PRINT_FOURCC(pixelformat) (void)0;
 #endif  // CONFIG_XIAOZHI_ENABLE_CAMERA_DEBUG_MODE
 
-EspVideo::EspVideo(const esp_video_init_config_t& config) {
+EspVideo::EspVideo(const esp_video_init_config_t& config, bool start_streaming) {
     if (esp_video_init(&config) != ESP_OK) {
         ESP_LOGE(TAG, "esp_video_init failed");
         return;
@@ -335,23 +335,36 @@ EspVideo::EspVideo(const esp_video_init_config_t& config) {
         }
         mmap_buffers_[i].start = start;
         mmap_buffers_[i].length = buf.length;
-
-        if (ioctl(video_fd_, VIDIOC_QBUF, &buf) != 0) {
-            ESP_LOGE(TAG, "VIDIOC_QBUF failed");
-            close(video_fd_);
-            video_fd_ = -1;
-            sensor_format_ = 0;
-            return;
-        }
     }
 
-    int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    if (ioctl(video_fd_, VIDIOC_STREAMON, &type) != 0) {
-        ESP_LOGE(TAG, "VIDIOC_STREAMON failed");
+    if (start_streaming && !StartStreaming()) {
         close(video_fd_);
         video_fd_ = -1;
         sensor_format_ = 0;
-        return;
+    }
+}
+
+bool EspVideo::StartStreaming() {
+    if (streaming_on_)
+        return true;
+    if (!IsInitialized())
+        return false;
+    // STREAMOFF clears both queues. Requeue each mapped buffer once on restart.
+    while (queued_buffers_ < mmap_buffers_.size()) {
+        v4l2_buffer buffer = {};
+        buffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        buffer.memory = V4L2_MEMORY_MMAP;
+        buffer.index = queued_buffers_;
+        if (ioctl(video_fd_, VIDIOC_QBUF, &buffer) != 0) {
+            ESP_LOGE(TAG, "VIDIOC_QBUF failed");
+            return false;
+        }
+        ++queued_buffers_;
+    }
+    int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    if (ioctl(video_fd_, VIDIOC_STREAMON, &type) != 0) {
+        ESP_LOGE(TAG, "VIDIOC_STREAMON failed");
+        return false;
     }
 
 #ifdef CONFIG_ESP_VIDEO_ENABLE_ISP_VIDEO_DEVICE
@@ -386,6 +399,21 @@ EspVideo::EspVideo(const esp_video_init_config_t& config) {
     ESP_LOGI(TAG, "Camera init success");
     streaming_on_ = true;
 #endif  // CONFIG_ESP_VIDEO_ENABLE_ISP_VIDEO_DEVICE
+    return true;
+}
+
+bool EspVideo::StopStreaming() {
+    if (!streaming_on_)
+        return true;
+    int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    if (ioctl(video_fd_, VIDIOC_STREAMOFF, &type) != 0) {
+        ESP_LOGE(TAG, "VIDIOC_STREAMOFF failed");
+        return false;
+    }
+    streaming_on_ = false;
+    queued_buffers_ = 0;
+    ESP_LOGI(TAG, "Camera stream stopped");
+    return true;
 }
 
 EspVideo::~EspVideo() {

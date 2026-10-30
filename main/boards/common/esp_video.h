@@ -34,6 +34,7 @@ private:
     size_t sensor_stride_ = 0;
     int video_fd_ = -1;
     bool streaming_on_ = false;
+    size_t queued_buffers_ = 0;
     struct MmapBuffer {
         void* start = nullptr;
         size_t length = 0;
@@ -54,7 +55,11 @@ public:
     // Synchronous borrowed frame, valid only inside consume. Caller serializes
     // against Capture/Explain. Does not copy, discard frames, or change the AI image.
     bool ReadPreview(const std::function<bool(const PreviewFrame&)>& consume);
-    EspVideo(const esp_video_init_config_t& config);
+    EspVideo(const esp_video_init_config_t& config, bool start_streaming = true);
+    // Serialized by the caller. On-demand streaming is for sensors without ISP warm-up.
+    bool StartStreaming();
+    bool StopStreaming();
+    bool IsInitialized() const { return video_fd_ >= 0 && sensor_format_ != 0; }
     ~EspVideo() override;
 
     virtual void SetExplainUrl(const std::string& url, const std::string& token);

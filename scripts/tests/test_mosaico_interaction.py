@@ -82,6 +82,7 @@ MosaicoCameraPreview::~MosaicoCameraPreview() = default;
 bool MosaicoCameraPreview::Present(const EspVideo::PreviewFrame&) { return true; }
 int main() {
     MosaicoCamera camera({});
+    assert(!EspVideo::streaming && EspVideo::starts==0);
     auto no_credentials=camera.CaptureAndExplain("test");
     assert(!no_credentials && EspVideo::captures==0);
     camera.SetExplainUrl("https://example.invalid/vision","token");
@@ -95,8 +96,13 @@ int main() {
     release.set_value();
     auto result=transaction.get(); assert(result && *result=="1");
     assert(competing.get() && EspVideo::captures==2);
+    assert(!EspVideo::streaming && EspVideo::starts==2 && EspVideo::stops==2);
     EspVideo::capture_ok=false;
     assert(!camera.CaptureAndExplain("test"));
+    assert(!EspVideo::streaming && EspVideo::starts==3 && EspVideo::stops==3);
+    EspVideo::start_ok=false;
+    assert(!camera.Capture());
+    assert(EspVideo::stops==3);
 }
 ''', stubs={"esp_video.h": r'''
 #pragma once
@@ -107,15 +113,18 @@ class EspVideo {
 public:
     struct PreviewFrame {};
     bool ReadPreview(const std::function<bool(const PreviewFrame&)>& consume) { return consume({}); }
-    inline static int captures=0;
+    inline static int captures=0, starts=0, stops=0;
+    inline static bool streaming=false, start_ok=true;
     inline static bool capture_ok=true;
     inline static std::function<void()> on_explain;
-    explicit EspVideo(const esp_video_init_config_t&) {}
-    bool IsReady() const { return true; }
+    explicit EspVideo(const esp_video_init_config_t&, bool start=true) { streaming=start; }
+    bool IsInitialized() const { return true; }
+    bool StartStreaming() { if(!start_ok) return false; ++starts; streaming=true; return true; }
+    bool StopStreaming() { ++stops; streaming=false; return true; }
     void SetExplainUrl(const std::string&,const std::string&) {}
     bool SetHMirror(bool) { return true; }
     bool SetVFlip(bool) { return true; }
-    bool Capture() { if(!capture_ok) return false; ++captures; return true; }
+    bool Capture() { if(!streaming || !capture_ok) return false; ++captures; return true; }
     std::expected<std::string,std::string> Explain(const std::string&) {
         const int frame=captures; if(on_explain) on_explain();
         if(frame!=captures) return std::unexpected("frame overwritten");
