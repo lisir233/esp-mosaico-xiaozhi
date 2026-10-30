@@ -3,6 +3,7 @@
 
 #include <lvgl.h>
 #include <memory>
+#include <functional>
 #include <thread>
 #include <vector>
 
@@ -28,10 +29,9 @@ private:
         v4l2_pix_fmt_t format = 0;
     } frame_;
     v4l2_pix_fmt_t sensor_format_ = 0;
-#ifdef CONFIG_XIAOZHI_ENABLE_ROTATE_CAMERA_IMAGE
     uint16_t sensor_width_ = 0;
     uint16_t sensor_height_ = 0;
-#endif  // CONFIG_XIAOZHI_ENABLE_ROTATE_CAMERA_IMAGE
+    size_t sensor_stride_ = 0;
     int video_fd_ = -1;
     bool streaming_on_ = false;
     struct MmapBuffer {
@@ -44,11 +44,22 @@ private:
     std::thread encoder_thread_;
 
 public:
+    struct PreviewFrame {
+        const uint8_t* data;
+        size_t size;
+        uint16_t width, height;
+        size_t stride;
+        v4l2_pix_fmt_t format;
+    };
+    // Synchronous borrowed frame, valid only inside consume. Caller serializes
+    // against Capture/Explain. Does not copy, discard frames, or change the AI image.
+    bool ReadPreview(const std::function<bool(const PreviewFrame&)>& consume);
     EspVideo(const esp_video_init_config_t& config);
     ~EspVideo() override;
 
     virtual void SetExplainUrl(const std::string& url, const std::string& token);
     virtual bool Capture();
+    bool IsReady() const { return streaming_on_ && video_fd_ >= 0; }
     // 翻转控制函数
     virtual bool SetHMirror(bool enabled) override;
     virtual bool SetVFlip(bool enabled) override;

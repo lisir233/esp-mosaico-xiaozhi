@@ -52,6 +52,7 @@ public:
     // Remove a matching message without clearing newer content, when supported.
     virtual void RemoveChatMessage(const char* role, const char* content) {}
     virtual void ClearChatMessages();
+    virtual bool PreserveChatOnIdle() const { return false; }
     virtual void SetTheme(Theme* theme);
     virtual Theme* GetTheme() { return current_theme_; }
     virtual void UpdateStatusBar(bool update_all = false);

@@ -50,6 +50,9 @@ bool LvglDisplay::SetTextFont(std::shared_ptr<LvglFont> text_font) {
     }
 
     DisplayLockGuard lock(this);
+    if (!lock) {
+        return false;
+    }
     auto& theme_manager = LvglThemeManager::GetInstance();
     auto light_theme = theme_manager.GetTheme("light");
     auto dark_theme = theme_manager.GetTheme("dark");
@@ -67,6 +70,8 @@ bool LvglDisplay::SetTextFont(std::shared_ptr<LvglFont> text_font) {
     if (dark_theme != nullptr) {
         dark_theme->set_text_font(text_font);
     }
+    // esp_lvgl_port uses a recursive mutex. Keep font ownership and style
+    // rebinding atomic with respect to rendering and other font updates.
     if (current_theme_ != nullptr) {
         SetTheme(current_theme_);
     }
@@ -321,6 +326,9 @@ void LvglDisplay::SetPowerSaveMode(bool on) {
 bool LvglDisplay::SnapshotToJpeg(std::string& jpeg_data, int quality) {
 #if CONFIG_LV_USE_SNAPSHOT
     DisplayLockGuard lock(this);
+    if (!lock) {
+        return false;
+    }
 
     lv_obj_t* screen = lv_screen_active();
     lv_draw_buf_t* draw_buffer = lv_snapshot_take(screen, LV_COLOR_FORMAT_RGB565);
@@ -329,28 +337,29 @@ bool LvglDisplay::SnapshotToJpeg(std::string& jpeg_data, int quality) {
         return false;
     }
 
-    // swap bytes
-    uint16_t* data = (uint16_t*)draw_buffer->data;
-    size_t pixel_count = draw_buffer->data_size / 2;
-    for (size_t i = 0; i < pixel_count; i++) {
-        data[i] = __builtin_bswap16(data[i]);
+    // Snapshots contain native RGB565, before the panel flush swaps bytes. The
+    // encoder expects RGB565 little endian. Compact any LVGL row alignment too.
+    const size_t row_bytes = draw_buffer->header.w * sizeof(uint16_t);
+    for (uint32_t y = 1; y < draw_buffer->header.h; ++y) {
+        std::memmove(draw_buffer->data + y * row_bytes,
+                     draw_buffer->data + y * draw_buffer->header.stride, row_bytes);
     }
 
     // Clear output string and use callback version to avoid pre-allocating large memory blocks
     jpeg_data.clear();
 
     // Use callback-based JPEG encoder to further save memory
-    bool ret =
-        image_to_jpeg_cb((uint8_t*)draw_buffer->data, draw_buffer->data_size, draw_buffer->header.w,
-                         draw_buffer->header.h, V4L2_PIX_FMT_RGB565, quality,
-                         [](void* arg, size_t index, const void* data, size_t len) -> size_t {
-                             std::string* output = static_cast<std::string*>(arg);
-                             if (data && len > 0) {
-                                 output->append(static_cast<const char*>(data), len);
-                             }
-                             return len;
-                         },
-                         &jpeg_data);
+    bool ret = image_to_jpeg_cb(
+        static_cast<uint8_t*>(draw_buffer->data), draw_buffer->data_size, draw_buffer->header.w,
+        draw_buffer->header.h, V4L2_PIX_FMT_RGB565, quality,
+        [](void* arg, size_t index, const void* data, size_t len) -> size_t {
+            std::string* output = static_cast<std::string*>(arg);
+            if (data && len > 0) {
+                output->append(static_cast<const char*>(data), len);
+            }
+            return len;
+        },
+        &jpeg_data);
     if (!ret) {
         ESP_LOGE(TAG, "Failed to convert image to JPEG");
     }

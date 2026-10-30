@@ -14,6 +14,13 @@ public:
     virtual bool SetVFlip(bool enabled) = 0;
     virtual bool SetSwapBytes(bool enabled) { return false; }  // Optional, default no-op
     virtual std::expected<std::string, std::string> Explain(const std::string& question) = 0;
+    // Override when a viewfinder also owns the camera: capture and explanation
+    // must use the same frame, without another task replacing it in between.
+    virtual std::expected<std::string, std::string> CaptureAndExplain(const std::string& question) {
+        if (!Capture())
+            return std::unexpected("Failed to capture photo");
+        return Explain(question);
+    }
 };
 
 #endif  // CAMERA_H

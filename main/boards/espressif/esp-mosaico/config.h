@@ -55,6 +55,7 @@
 
 // Application AI button; the ROM BOOT button is GPIO61.
 #define AI_BUTTON_GPIO GPIO_NUM_7
+#define MOTOR_GPIO GPIO_NUM_8
 
 // Board power rails. VCC_PW is active low. CODEC_PW only exists on v1.0.
 #define POWER_VCC_3V3_GPIO GPIO_NUM_60

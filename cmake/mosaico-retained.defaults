@@ -1,0 +1,7 @@
+# The retained bootloader must fit before the immutable partition-table offset.
+# XiaoZhi's generic performance optimization exceeds that space on ESP32-S31.
+CONFIG_BOOTLOADER_COMPILER_OPTIMIZATION_SIZE=y
+
+# Preserve the workspace's existing application optimization while restoring
+# common UI defaults; changing speech-model execution is outside this UI fix.
+CONFIG_COMPILER_OPTIMIZATION_DEBUG=y

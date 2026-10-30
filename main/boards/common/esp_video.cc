@@ -189,10 +189,6 @@ EspVideo::EspVideo(const esp_video_init_config_t& config) {
 
     struct v4l2_format setformat = {};
     setformat.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-#ifdef CONFIG_XIAOZHI_ENABLE_ROTATE_CAMERA_IMAGE
-    sensor_width_ = format.fmt.pix.width;
-    sensor_height_ = format.fmt.pix.height;
-#endif  // CONFIG_XIAOZHI_ENABLE_ROTATE_CAMERA_IMAGE
     setformat.fmt.pix.width = format.fmt.pix.width;
     setformat.fmt.pix.height = format.fmt.pix.height;
 
@@ -290,6 +286,10 @@ EspVideo::EspVideo(const esp_video_init_config_t& config) {
     SetHMirror(kConfiguredHMirror);
     SetVFlip(kConfiguredVFlip);
 #endif
+
+    sensor_width_ = setformat.fmt.pix.width;
+    sensor_height_ = setformat.fmt.pix.height;
+    sensor_stride_ = setformat.fmt.pix.bytesperline;
 
 #ifdef CONFIG_XIAOZHI_ENABLE_ROTATE_CAMERA_IMAGE
     frame_.width = setformat.fmt.pix.height;
@@ -409,6 +409,28 @@ EspVideo::~EspVideo() {
 void EspVideo::SetExplainUrl(const std::string& url, const std::string& token) {
     explain_url_ = url;
     explain_token_ = token;
+}
+
+bool EspVideo::ReadPreview(const std::function<bool(const PreviewFrame&)>& consume) {
+    if (!IsReady() || !consume)
+        return false;
+    v4l2_buffer buffer = {};
+    buffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    buffer.memory = V4L2_MEMORY_MMAP;
+    if (ioctl(video_fd_, VIDIOC_DQBUF, &buffer) != 0)
+        return false;
+    bool ok = false;
+    if (buffer.index < mmap_buffers_.size() && buffer.bytesused > 0 &&
+        buffer.bytesused <= mmap_buffers_[buffer.index].length) {
+        const PreviewFrame frame{static_cast<const uint8_t*>(mmap_buffers_[buffer.index].start),
+                                 buffer.bytesused, sensor_width_, sensor_height_, sensor_stride_,
+                                 sensor_format_};
+        ok = consume(frame);
+    }
+    // Return the DMA buffer even when conversion/presentation fails.
+    if (ioctl(video_fd_, VIDIOC_QBUF, &buffer) != 0)
+        return false;
+    return ok;
 }
 
 bool EspVideo::Capture() {

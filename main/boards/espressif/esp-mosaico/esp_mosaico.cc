@@ -1,3 +1,4 @@
+#include <cJSON.h>
 #include "application.h"
 #include "backlight.h"
 #include "bq27220.h"
@@ -7,11 +8,13 @@
 #include "display/lcd_display.h"
 #include "esp_lcd_co5300.h"
 #include "esp_lcd_touch_cst9220.h"
-#include "esp_video.h"
 #include "i2c_bus.h"
 #include "led/gpio_led.h"
 #include "lvgl_theme.h"
 #include "mcp_server.h"
+#include "mosaico_camera.h"
+#include "mosaico_display.h"
+#include "mosaico_feedback.h"
 #include "settings.h"
 #include "wifi_board.h"
 
@@ -21,13 +24,17 @@
 #include <esp_check.h>
 #include <esp_efuse.h>
 #include <esp_efuse_table.h>
+#include <esp_iris.h>
 #include <esp_log.h>
 #include <esp_lvgl_port.h>
 #include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include <freertos/task.h>
 #include <hal/usb_serial_jtag_ll.h>
 
+#include <cstdint>
 #include <cstring>
+#include <string>
 
 #define TAG "EspMosaico"
 #define LCD_OPCODE_WRITE_CMD (0x02ULL)
@@ -49,6 +56,8 @@ constexpr size_t kModuleEepromDescCrcOffset = 0x34;
 constexpr size_t kModuleEepromMfgCrcOffset = 0x3E;
 constexpr size_t kModuleEepromParamCrcOffset = 0x84;
 constexpr uint8_t kModuleTypeCamera = 0x07;
+// Match the BSP's stable LCD DMA path (f629a8e) and GPIO defaults (e1db301).
+constexpr size_t kLcdDmaChunkLines = 8;
 
 // Mosaico BSP's interim fixed-EDV profile, characterized for its 80 mAh cell.
 static const parameter_cedv_t kBatteryCedv = {
@@ -152,29 +161,6 @@ private:
     Display* display_;
 };
 
-class MosaicoDisplay : public SpiLcdDisplay {
-public:
-    using SpiLcdDisplay::SpiLcdDisplay;
-
-    void SetupUI() override {
-        SpiLcdDisplay::SetupUI();
-
-        // Use dark on a fresh device, while preserving a user-selected theme.
-        Settings settings("display", false);
-        if (settings.GetString("theme").empty()) {
-            auto* dark_theme = LvglThemeManager::GetInstance().GetTheme("dark");
-            if (dark_theme != nullptr) {
-                SetTheme(dark_theme);
-            }
-        }
-
-        DisplayLockGuard lock(this);
-        // Keep Wi-Fi, mute, and battery icons within the rounded-screen safe area.
-        lv_obj_set_style_pad_left(top_bar_, DISPLAY_TOP_BAR_HORIZONTAL_INSET, 0);
-        lv_obj_set_style_pad_right(top_bar_, DISPLAY_TOP_BAR_HORIZONTAL_INSET, 0);
-    }
-};
-
 class EspMosaicoBoard : public WifiBoard {
 private:
     BoardVariant variant_ = BoardVariant::kV1_0;
@@ -187,8 +173,10 @@ private:
     esp_lcd_touch_handle_t touch_ = nullptr;
     esp_lcd_panel_io_handle_t touch_io_ = nullptr;
     lv_indev_t* touch_indev_ = nullptr;
-    EspVideo* camera_ = nullptr;
+    MosaicoCamera* camera_ = nullptr;
+    MosaicoFeedback feedback_;
     bq27220_handle_t battery_ = nullptr;
+    std::string iris_screenshot_;
 
     bool IsV1_0() const { return variant_ == BoardVariant::kV1_0; }
 
@@ -317,10 +305,16 @@ private:
             .data5_io_num = GPIO_NUM_NC,
             .data6_io_num = GPIO_NUM_NC,
             .data7_io_num = GPIO_NUM_NC,
-            .max_transfer_sz = DISPLAY_WIDTH * DISPLAY_HEIGHT * sizeof(uint16_t),
+            .max_transfer_sz = DISPLAY_WIDTH * kLcdDmaChunkLines * sizeof(uint16_t),
             .flags = SPICOMMON_BUSFLAG_QUAD,
         };
         ESP_ERROR_CHECK(spi_bus_initialize(DISPLAY_QSPI_HOST, &bus_config, SPI_DMA_CH_AUTO));
+
+        const gpio_num_t qspi_pins[] = {sclk, DISPLAY_QSPI_D0, DISPLAY_QSPI_D1, DISPLAY_QSPI_D2,
+                                        DISPLAY_QSPI_D3};
+        for (const auto pin : qspi_pins) {
+            ESP_ERROR_CHECK(gpio_set_drive_capability(pin, GPIO_DRIVE_CAP_DEFAULT));
+        }
 
         esp_lcd_panel_io_handle_t panel_io = nullptr;
         const esp_lcd_panel_io_spi_config_t io_config = {
@@ -331,9 +325,11 @@ private:
             .trans_queue_depth = 10,
             .lcd_cmd_bits = 32,
             .lcd_param_bits = 8,
-            .flags = {.quad_mode = true, .psram_dma_direct = true},
+            .flags = {.quad_mode = true, .psram_dma_direct = false},
         };
         ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi(DISPLAY_QSPI_HOST, &io_config, &panel_io));
+        ESP_LOGI(TAG, "LCD QSPI: 40 MHz, %u-byte DMA chunks, SRAM staging, drive=%d",
+                 static_cast<unsigned>(bus_config.max_transfer_sz), GPIO_DRIVE_CAP_DEFAULT);
 
         co5300_vendor_config_t vendor_config = {
             .init_cmds = kCo5300InitCommands,
@@ -398,6 +394,72 @@ private:
             .handle = touch_,
         };
         touch_indev_ = lvgl_port_add_touch(&port_config);
+    }
+
+    static esp_err_t IrisScreenBegin(const esp_iris_media_desc_t* requested,
+                                     esp_iris_media_desc_t* actual, uint32_t* total_size,
+                                     void* user_ctx) {
+        (void)requested;
+        auto* self = static_cast<EspMosaicoBoard*>(user_ctx);
+        if (self == nullptr || self->display_ == nullptr || actual == nullptr ||
+            total_size == nullptr) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        constexpr uint16_t kJpegQuality = 75;
+        if (!self->display_->SnapshotToJpeg(self->iris_screenshot_, kJpegQuality)) {
+            return ESP_FAIL;
+        }
+        if (self->iris_screenshot_.size() > UINT32_MAX) {
+            self->iris_screenshot_.clear();
+            return ESP_ERR_INVALID_SIZE;
+        }
+        *actual = {
+            .x = 0,
+            .y = 0,
+            .width = DISPLAY_WIDTH,
+            .height = DISPLAY_HEIGHT,
+            .stride = 0,
+            .format = ESP_IRIS_PIXEL_FORMAT_JPEG,
+            .quality = kJpegQuality,
+        };
+        *total_size = static_cast<uint32_t>(self->iris_screenshot_.size());
+        return ESP_OK;
+    }
+
+    static esp_err_t IrisScreenRead(uint32_t offset, uint8_t* out, size_t capacity,
+                                    size_t* out_size, void* user_ctx) {
+        auto* self = static_cast<EspMosaicoBoard*>(user_ctx);
+        if (self == nullptr || out == nullptr || out_size == nullptr || capacity == 0 ||
+            offset > self->iris_screenshot_.size()) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        const size_t remaining = self->iris_screenshot_.size() - offset;
+        const size_t size = remaining < capacity ? remaining : capacity;
+        std::memcpy(out, self->iris_screenshot_.data() + offset, size);
+        *out_size = size;
+        return ESP_OK;
+    }
+
+    static void IrisScreenEnd(void* user_ctx) {
+        auto* self = static_cast<EspMosaicoBoard*>(user_ctx);
+        if (self != nullptr) {
+            self->iris_screenshot_.clear();
+        }
+    }
+
+    void InitializeIrisScreen() {
+        const esp_iris_screen_backend_t backend = {
+            .begin = IrisScreenBegin,
+            .read = IrisScreenRead,
+            .end = IrisScreenEnd,
+            .user_ctx = this,
+        };
+        const esp_err_t err = esp_iris_screen_register(&backend);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "register ESP-Iris screenshot backend failed: %s", esp_err_to_name(err));
+        }
+        if (!display_->RegisterPointer())
+            ESP_LOGW(TAG, "ESP-Iris pointer input unavailable");
     }
 
     void InitializeCameraI2c() {
@@ -496,7 +558,122 @@ private:
         const esp_video_init_config_t video_config = {
             .dvp = &dvp_config,
         };
-        camera_ = new EspVideo(video_config);
+        camera_ = new MosaicoCamera(video_config);
+    }
+
+    void InitializeInteraction() {
+        if (camera_ != nullptr) {
+            if (!camera_->Start(
+                    [this](MosaicoCamera::Result result) {
+                        Application::GetInstance().Schedule([this, result = std::move(result)]() {
+                            display_->CameraBusy(false);
+                            if (!result) {
+                                ESP_LOGW(TAG, "Vision request failed: %s", result.error().c_str());
+                                display_->CameraHint(result.error().find("请") != std::string::npos
+                                                         ? result.error().c_str()
+                                                         : "识图服务暂不可用，请稍后重试");
+                                return;
+                            }
+                            std::string answer;
+                            cJSON* root = cJSON_Parse(result->c_str());
+                            if (cJSON_IsString(root))
+                                answer = root->valuestring;
+                            for (const char* key : {"text", "content", "description", "result"}) {
+                                const cJSON* value = cJSON_GetObjectItemCaseSensitive(root, key);
+                                if (cJSON_IsString(value)) {
+                                    answer = value->valuestring;
+                                    break;
+                                }
+                            }
+                            cJSON_Delete(root);
+                            if (answer.empty()) {
+                                // Some image services return plain text rather than JSON.
+                                if (!result->empty() && result->front() != '{' &&
+                                    result->front() != '[')
+                                    answer = *result;
+                                else
+                                    answer = "暂时无法读取识图结果，请尝试语音提问";
+                            }
+                            display_->CloseCamera();
+                            display_->SetChatMessage("user", "请描述这张照片");
+                            display_->SetChatMessage("assistant", answer.c_str());
+                            feedback_.Pulse(50);
+                        });
+                    },
+                    [this]() {
+                        display_->CameraHint("相机取景失败，请检查子板后重试");
+                        display_->CameraBusy(false);
+                    },
+                    [this]() {
+                        const bool allowed =
+                            Application::GetInstance().GetDeviceState() == kDeviceStateIdle;
+                        if (!allowed)
+                            display_->CameraHint("对话中，取景暂停；可直接拍照");
+                        return allowed;
+                    }))
+                ESP_LOGW(TAG, "Camera viewfinder worker unavailable");
+        }
+        display_->SetHandler([this](MosaicoUi::Action action, int value) {
+            // LVGL callbacks never do I2C, audio lifecycle work or HTTP.
+            Application::GetInstance().Schedule([this, action, value]() {
+                feedback_.Pulse();
+                auto& app = Application::GetInstance();
+                using Action = MosaicoUi::Action;
+                switch (action) {
+                    case Action::Chat:
+                        app.ToggleChatState();
+                        break;
+                    case Action::OpenCamera:
+                        display_->OpenCamera(camera_ && camera_->Available());
+                        if (camera_)
+                            camera_->Preview(true);
+                        break;
+                    case Action::CloseCamera:
+                        if (camera_)
+                            camera_->Preview(false);
+                        display_->CloseCamera();
+                        break;
+                    case Action::Inspect:
+                        if (camera_ && camera_->Inspect()) {
+                            display_->CameraBusy(true);
+                            display_->CameraHint("正在拍照识图…");
+                        }
+                        break;
+                    case Action::Ask:
+                        if (camera_)
+                            camera_->Preview(false);
+                        display_->CloseCamera();
+                        display_->ShowNotification("请说出你想问的问题");
+                        app.StartListening();
+                        break;
+                    case Action::Volume:
+                        GetAudioCodec()->SetOutputVolume(value);
+                        break;
+                    case Action::Brightness:
+                        backlight_->SetBrightness(value, true);
+                        break;
+                    case Action::Feedback:
+                        display_->SetControls(GetAudioCodec()->output_volume(),
+                                              backlight_->brightness());
+                        break;
+                }
+            });
+        });
+        if (!feedback_.Start(i2c_bus_, [this](float x, float y, bool pickup) {
+                display_->Motion(x, y);
+                if (pickup) {
+                    ESP_LOGI(TAG, "Pickup detected");
+                    Application::GetInstance().Schedule([this]() {
+                        if (Application::GetInstance().GetDeviceState() != kDeviceStateIdle)
+                            return;
+                        // Movement is feedback, never consent to activate the microphone.
+                        backlight_->RestoreBrightness();
+                        display_->ShowNotification("我在，轻触我聊一聊", 1500);
+                        feedback_.Pulse(40);
+                    });
+                }
+            }))
+            ESP_LOGW(TAG, "Motion/haptic feedback unavailable");
     }
 
     void InitializeTools() {
@@ -525,9 +702,11 @@ public:
         InitializeBattery();
         InitializeButtons();
         InitializeDisplay();
+        InitializeIrisScreen();
         InitializeTouch();
         InitializeCamera();
         InitializeTools();
+        InitializeInteraction();
     }
 
     AudioCodec* GetAudioCodec() override {

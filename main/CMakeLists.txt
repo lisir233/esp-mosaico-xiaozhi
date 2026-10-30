@@ -1212,6 +1212,8 @@ idf_component_register(SRCS ${SOURCES}
                         esp_driver_tsens
                         esp_app_format
                         app_update
+                        esp_iris
+                        esp_mosaico_app_recovery
                         spi_flash
                         mbedtls
                         console
@@ -1546,6 +1548,8 @@ if ("${size}" AND "${offset}")
         # Build default assets based on configuration
         build_default_assets_bin()
         esptool_py_flash_to_partition(flash "assets" "${GENERATED_ASSETS_LOCAL_FILE}")
+        set(ASSETS_SYSTEM_UPDATE_IMAGE "${GENERATED_ASSETS_LOCAL_FILE}")
+        set(ASSETS_SYSTEM_UPDATE_TARGET generated_default_assets)
         message(STATUS "Generated default assets flash configured: ${GENERATED_ASSETS_LOCAL_FILE} -> assets partition")
     elseif(CONFIG_FLASH_CUSTOM_ASSETS)
         # Flash custom assets
@@ -1553,6 +1557,8 @@ if ("${size}" AND "${offset}")
         set(CONFIGURED_ASSETS_FILE "${CMAKE_BINARY_DIR}/configured_assets.bin")
         configure_assets_models("${ASSETS_LOCAL_FILE}" "${CONFIGURED_ASSETS_FILE}")
         esptool_py_flash_to_partition(flash "assets" "${CONFIGURED_ASSETS_FILE}")
+        set(ASSETS_SYSTEM_UPDATE_IMAGE "${CONFIGURED_ASSETS_FILE}")
+        set(ASSETS_SYSTEM_UPDATE_TARGET configured_assets)
         message(STATUS "Custom assets flash configured: ${CONFIGURED_ASSETS_FILE} -> assets partition")
     elseif(CONFIG_FLASH_EXPRESSION_ASSETS)
         set(ASSETS_NAME "expression_assets")
@@ -1568,9 +1574,21 @@ if ("${size}" AND "${offset}")
         set(CONFIGURED_ASSETS_FILE "${CMAKE_BINARY_DIR}/configured_assets.bin")
         configure_assets_models("${ASSETS_FILE}" "${CONFIGURED_ASSETS_FILE}")
         esptool_py_flash_to_partition(flash "${ASSETS_PARTITION}" "${CONFIGURED_ASSETS_FILE}")
+        set(ASSETS_SYSTEM_UPDATE_IMAGE "${CONFIGURED_ASSETS_FILE}")
+        set(ASSETS_SYSTEM_UPDATE_TARGET configured_assets)
     elseif(CONFIG_FLASH_NONE_ASSETS)
         message(STATUS "Assets flashing disabled (FLASH_NONE_ASSETS)")
     endif()
 else()
     message(STATUS "Assets partition not found, using v1 partition table")
+endif()
+
+# The retained updater writes data resources only when their producer declares
+# both the image and target. Keep code-only builds valid when assets are disabled.
+if(ASSETS_SYSTEM_UPDATE_IMAGE AND ASSETS_SYSTEM_UPDATE_TARGET)
+    set_property(GLOBAL APPEND PROPERTY MOSAICO_SYSTEM_UPDATE_DATA_LABELS assets)
+    set_property(GLOBAL PROPERTY MOSAICO_SYSTEM_UPDATE_DATA_assets_IMAGE
+        "${ASSETS_SYSTEM_UPDATE_IMAGE}")
+    set_property(GLOBAL PROPERTY MOSAICO_SYSTEM_UPDATE_DATA_assets_TARGET
+        "${ASSETS_SYSTEM_UPDATE_TARGET}")
 endif()

@@ -1037,7 +1037,7 @@ void Application::HandleStateChangedEvent() {
             // otherwise wipe the status, emotion, and chat message.
             if (last_error_message_.empty()) {
                 display->SetStatus(Lang::Strings::STANDBY);
-                display->ClearChatMessages();  // Clear messages first
+                if (!display->PreserveChatOnIdle()) display->ClearChatMessages();
                 display->SetEmotion(
                     "neutral");  // Then set emotion (wechat mode checks child count)
             }
