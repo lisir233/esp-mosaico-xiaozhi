@@ -2,6 +2,31 @@
 
 基于 [XiaoZhi](https://github.com/78/xiaozhi-esp32) 的 ESP-Mosaico 语音助手，支持中文对话、触屏伙伴、会话记录，以及可选摄像头取景和拍照问答。
 
+## 图片预览 / Gallery
+
+![小智 ESP-Mosaico：AI 渲染主图](images/hero-ai.png)
+
+主图为 AI 生成的产品效果图，用于展示应用形象；下面三张为设备直接截取的真实界面。
+The cover is an AI-generated product visualization. The following images are actual device screenshots.
+
+### 主页面 / Home
+
+![主页面实机截图](images/home.jpg)
+
+“我在，慢慢说。”轻触伙伴或点击“聊一聊”开始交流。
+
+### 语音对话 / Conversation
+
+![对话页面实机截图](images/conversation.jpg)
+
+对话时伙伴缩小，屏幕展示识别内容和小智回复。
+
+### 下拉设置 / Settings
+
+![下拉设置实机截图](images/settings.jpg)
+
+调节音量、亮度，清空对话，或进入“网络配网”。
+
 本次上传为 **2.5.3 开发调试版**，适用于 ESP32-S31、16 MiB Flash 的 ESP-Mosaico 产品分区布局，要求 Vibe Mode 0.2.0 或更新版本。请通过 Mosaico 的兼容性检查安装，保留 Vibe Mode。固件包含应用和字体/表情资源，不含设备身份、Wi-Fi 凭据或 Vibe Mode 镜像。
 
 ## 使用

@@ -12,6 +12,12 @@
   "website": {
     "readme": "publishing/README.md",
     "changelog": "publishing/CHANGELOG.md",
+    "covers": [
+      "publishing/images/hero-ai.png",
+      "publishing/images/home.jpg",
+      "publishing/images/conversation.jpg",
+      "publishing/images/settings.jpg"
+    ],
     "attachments": ["publishing/FONT-LICENSE.txt"]
   },
   "device": {
