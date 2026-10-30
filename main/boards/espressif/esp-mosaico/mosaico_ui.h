@@ -6,7 +6,17 @@
 // Shared native view. Caller holds the LVGL lock; services and fonts outlive it.
 class MosaicoUi {
 public:
-    enum class Action { Chat, OpenCamera, CloseCamera, Inspect, Ask, Volume, Brightness, Feedback };
+    enum class Action {
+        Chat,
+        OpenCamera,
+        CloseCamera,
+        Inspect,
+        Ask,
+        Volume,
+        Brightness,
+        Feedback,
+        ConfigureWifi
+    };
     enum class State { Idle, Listening, Speaking, Busy };
     using Handler = std::function<void(Action, int)>;
     MosaicoUi(lv_obj_t* screen, const lv_font_t* font);

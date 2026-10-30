@@ -60,7 +60,18 @@ companion character. Tap the character or chat button to talk. During conversati
 the character shrinks to leave room for text. Long replies scroll; the history
 button opens the last 20 messages, bounded to approximately 2 KB each with UTF-8
 safe truncation. Returning to idle preserves history; reboot clears this RAM-only
-history. Pull down the header or tap the title for volume, brightness and clearing.
+history. Pull down the header or tap the title for volume, brightness, clearing
+history and **Network setup** (网络配网). Network setup closes the menu and uses
+XiaoZhi's existing hotspot provisioning flow; it does not erase saved networks.
+During activation/upgrade or other unsupported busy states, the UI asks to retry
+when idle.
+
+At network startup, existing XiaoZhi Wi-Fi settings take priority. Only when its
+saved network list is empty, the board reads `wifi_ssid` and `wifi_password` via
+`mosaico_shared_get()` and saves a valid pair as XiaoZhi's initial network.
+The Vibe Mode shared values remain read-only. An empty password supports an open
+network; missing or invalid values fall back to the usual provisioning flow.
+Later edits to Vibe Mode credentials do not overwrite XiaoZhi's saved networks.
 
 The camera button opens the left CameraBoard viewfinder. The orange shutter sends
 a photo for visual description; Ask returns to voice input. The vision endpoint is

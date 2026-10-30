@@ -118,7 +118,7 @@ int main(int argc, char** argv) {
     lv_obj_center(status);
     view.BindStatus(bar);
     view.SetControls(70, 80);
-    int chats = 0, opens = 0, inspects = 0, closes = 0;
+    int chats = 0, opens = 0, inspects = 0, closes = 0, wifi_configs = 0;
     bool available = false;
     view.SetHandler([&](MosaicoUi::Action action, int) {
         using Action = MosaicoUi::Action;
@@ -140,6 +140,9 @@ int main(int argc, char** argv) {
                 ++inspects;
                 view.SetCameraBusy(true);
                 view.SetCameraHint("正在拍照识图…");
+                break;
+            case Action::ConfigureWifi:
+                ++wifi_configs;
                 break;
             default:
                 break;
@@ -252,6 +255,12 @@ int main(int argc, char** argv) {
     assert(done &&
            !lv_obj_has_flag(lv_obj_get_parent(lv_obj_get_parent(done)), LV_OBJ_FLAG_HIDDEN));
     Save(screen, "settings.ppm");
+    Click(screen, "网络配网");
+    assert(wifi_configs == 1);
+    assert(lv_obj_has_flag(lv_obj_get_parent(lv_obj_get_parent(done)), LV_OBJ_FLAG_HIDDEN));
+    assert(Find(screen, "你可以点“最新”回到最后一条消息。"));
+    Tap(100, 35);  // Reopen settings without invoking provisioning again.
+    assert(wifi_configs == 1);
     Click(screen, "完成");
     for (int i = 0; i < 30; ++i)
         view.AddMessage("assistant", std::to_string(i).c_str());

@@ -226,10 +226,17 @@ MosaicoUi::MosaicoUi(lv_obj_t* screen, const lv_font_t* font) {
             },
             LV_EVENT_RELEASED, this);
     }
-    auto* clear = Button(settings_, "清空对话", 24, 294, 408, Action::Feedback);
+    auto* clear = Button(settings_, "清空对话", 24, 294, 196, Action::Feedback);
     lv_obj_add_event_cb(
         clear,
         [](lv_event_t* e) { static_cast<MosaicoUi*>(lv_event_get_user_data(e))->ClearMessages(); },
+        LV_EVENT_CLICKED, this);
+    auto* wifi = Button(settings_, "网络配网", 236, 294, 196, Action::ConfigureWifi);
+    lv_obj_add_event_cb(
+        wifi,
+        [](lv_event_t* e) {
+            Visible(static_cast<MosaicoUi*>(lv_event_get_user_data(e))->settings_, false);
+        },
         LV_EVENT_CLICKED, this);
     auto* done = Button(settings_, "完成", 24, 370, 408, Action::Feedback);
     lv_obj_set_style_bg_color(done, lv_color_hex(kAccent), 0);

@@ -16,6 +16,7 @@
 #include "mosaico_display.h"
 #include "mosaico_display_config.h"
 #include "mosaico_feedback.h"
+#include "mosaico_wifi.h"
 #include "settings.h"
 #include "wifi_board.h"
 
@@ -661,6 +662,24 @@ private:
                     case Action::Brightness:
                         backlight_->SetBrightness(value, true);
                         break;
+                    case Action::ConfigureWifi:
+                        if (IsInWifiConfigMode()) {
+                            display_->ShowNotification("已在配网模式，请连接小智热点");
+                            break;
+                        }
+                        switch (app.GetDeviceState()) {
+                            case kDeviceStateStarting:
+                            case kDeviceStateIdle:
+                            case kDeviceStateListening:
+                            case kDeviceStateSpeaking:
+                            case kDeviceStateNotifying:
+                                EnterWifiConfigMode();
+                                break;
+                            default:
+                                display_->ShowNotification("当前忙碌，请稍后进入配网");
+                                break;
+                        }
+                        break;
                     case Action::Feedback:
                         display_->SetControls(GetAudioCodec()->output_volume(),
                                               backlight_->brightness());
@@ -705,6 +724,17 @@ private:
     }
 
 public:
+    void StartNetwork() override {
+        const auto result = mosaico::ImportSharedWifiIfEmpty();
+        if (result == mosaico::WifiDefaultsResult::Imported)
+            ESP_LOGI(TAG, "Wi-Fi defaults imported from Vibe Mode shared settings");
+        else if (result == mosaico::WifiDefaultsResult::AlreadyConfigured)
+            ESP_LOGI(TAG, "Using existing local Wi-Fi configuration");
+        else
+            ESP_LOGI(TAG, "No usable shared Wi-Fi defaults; using normal provisioning flow");
+        WifiBoard::StartNetwork();
+    }
+
     EspMosaicoBoard() : ai_button_(AI_BUTTON_GPIO) {
         InitializePower();
         InitializeI2c();
